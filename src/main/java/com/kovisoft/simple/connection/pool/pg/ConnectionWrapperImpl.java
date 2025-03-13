@@ -37,30 +37,20 @@ public class ConnectionWrapperImpl implements ConnectionWrapper {
         return pid;
     }
 
-    @Override
-    public PreparedStatement getPreparedStatement(String stringStmt) throws SQLException {
-        if(stringStmt == null) throw new SQLException("Prepared statements cannot be null!");
-        if(preparedStatements.containsKey(stringStmt)){
-            return preparedStatements.get(stringStmt);
-        } else if(tempStatements.containsKey(stringStmt)){
-            return tempStatements.get(stringStmt);
-        } else {
-            tempStatements.put(stringStmt, connection.prepareStatement(stringStmt));
-            return tempStatements.get(stringStmt);
-        }
+    public Connection borrowConnection() {
+        if(inUse) return null;
+        inUse = true;
+        return connection;
+    }
+
+    public boolean inUse(){
+        return inUse;
     }
 
     @Override
-    public PreparedStatement getPreparedStatement(String stringStmt, int statementConstant) throws SQLException {
-        if(stringStmt == null) throw new SQLException("Prepared statements cannot be null!");
-        if(preparedStatements.containsKey(stringStmt)){
-            return preparedStatements.get(stringStmt);
-        } else if(tempStatements.containsKey(stringStmt)){
-            return tempStatements.get(stringStmt);
-        } else {
-            preparedStatements.put(stringStmt, connection.prepareStatement(stringStmt, statementConstant));
-            return preparedStatements.get(stringStmt);
-        }
+    public PreparedStatement getPreparedStatement(String key) throws NullPointerException {
+        if(key == null) throw new NullPointerException("Prepared statement keys cannot be null!");
+        return preparedStatements.getOrDefault(key, null);
     }
 
 
@@ -70,37 +60,42 @@ public class ConnectionWrapperImpl implements ConnectionWrapper {
         setConnectionPid();
     }
 
-    protected ConnectionWrapperImpl(String url, String user, String pass, int lifespanMinutes, Set<String> statements) throws SQLException {
+    protected ConnectionWrapperImpl(String url, String user, String pass, int lifespanMinutes,
+                                    Map<String, String> statements) throws SQLException {
         this(url, user, pass, lifespanMinutes);
         addPreparedStatements(statements);
     }
 
-    protected void addPreparedStatements(Set<String> prepStatements) throws SQLException {
-        for(String stmt : prepStatements){
-            if(preparedStatements.containsKey(stmt)) continue;
-            preparedStatements.put(stmt, connection.prepareStatement(stmt));
+    protected ConnectionWrapperImpl(String url, String user, String pass, int lifespanMinutes,
+                                    Map<String, String> statements, Map<String, Integer> constants) throws SQLException {
+        this(url, user, pass, lifespanMinutes);
+        addPreparedStatements(statements, constants);
+    }
+
+    protected void addPreparedStatements(Map<String, String> prepStatements) throws SQLException {
+        for(Map.Entry<String, String> entry : prepStatements.entrySet()){
+            if(preparedStatements.containsKey(entry.getKey())) continue;
+            if(entry.getValue() == null) continue;
+            preparedStatements.put(entry.getKey(), connection.prepareStatement(entry.getValue()));
         }
     }
 
-    protected void addPreparedStatements(List<String> prepedStatements) throws SQLException {
-        for(String stmt : prepedStatements){
-            if(preparedStatements.containsKey(stmt)) continue;
-            preparedStatements.put(stmt, connection.prepareStatement(stmt));
+    protected void addPreparedStatements(Map<String, String> prepStatements,
+                                         Map<String, Integer> stmtConstants) throws SQLException {
+        for(Map.Entry<String, String> entry : prepStatements.entrySet()){
+            if(preparedStatements.containsKey(entry.getKey())) continue;
+            if(entry.getValue() == null) continue;
+            if(stmtConstants.containsKey(entry.getKey())){
+                preparedStatements.put(entry.getKey(),
+                        connection.prepareStatement(entry.getValue(), stmtConstants.get(entry.getKey())));
+            } else {
+                preparedStatements.put(entry.getKey(), connection.prepareStatement(entry.getValue()));
+            }
         }
-    }
-
-    protected Set<String> getPreparedStatementsList(){
-        return preparedStatements.keySet();
     }
 
     protected int countStatements(){
         return preparedStatements.size();
-    }
-
-    protected Connection borrowConnection() {
-        if(inUse) return null;
-        inUse = true;
-        return connection;
     }
 
     protected Connection getConnection(){
@@ -124,10 +119,6 @@ public class ConnectionWrapperImpl implements ConnectionWrapper {
             }
         }
         tempStatements.clear();
-    }
-
-    protected boolean isInUse(){
-        return inUse;
     }
 
     protected boolean validate() throws SQLException {
