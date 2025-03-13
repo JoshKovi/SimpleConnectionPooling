@@ -2,10 +2,14 @@ package com.kovisoft.simple.connection.pool.pg;
 
 import com.kovisoft.logger.exports.Logger;
 import com.kovisoft.logger.exports.LoggerFactory;
+import com.kovisoft.simple.connection.pool.exports.ConnectionWrapper;
 import com.kovisoft.simple.connection.pool.exports.PoolConfig;
 import com.kovisoft.simple.connection.pool.exports.SimplePgConnectionPool;
 
 import java.sql.*;
+import java.time.Duration;
+import java.time.OffsetDateTime;
+import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
@@ -15,9 +19,9 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
 
     protected final Logger logger = LoggerFactory.createLogger(System.getProperty("user.dir") + "/logs", "DB_pool_");
     private final static String GET_CONN_STATE = "SELECT state FROM pg_stat_activity WHERE pid = ?";
-    private ConnectionWrapper managerConnection;
-    private final BlockingQueue<ConnectionWrapper> connections;
-    private final Set<ConnectionWrapper> cws = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private ConnectionWrapperImpl managerConnection;
+    private final BlockingQueue<ConnectionWrapperImpl> connections;
+    private final Set<ConnectionWrapperImpl> cws = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     private final int maxCharacters;
     private final int maxCachedStatements;
@@ -53,7 +57,7 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
         this.connectionUrl = config.getUrl();
         this.user = config.getUser();
         this.pass = config.getPass();
-        managerConnection = new ConnectionWrapper(connectionUrl, user, pass, connectionLifeSpan * 2, Set.of(GET_CONN_STATE));
+        managerConnection = new ConnectionWrapperImpl(connectionUrl, user, pass, connectionLifeSpan * 2, Set.of(GET_CONN_STATE));
 
         for(int i = 0; i < targetConnections; i++){initConnAndAddToPool();}
         managePool();
@@ -76,21 +80,21 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
     }
 
     @Override
-    public Connection borrowConnection() throws SQLException, InterruptedException {
+    public ConnectionWrapper borrowConnection() throws SQLException, InterruptedException {
         return borrowConnection(20);
     }
 
     @Override
-    public Connection borrowConnection(long millis) throws SQLException, InterruptedException {
+    public ConnectionWrapper borrowConnection(long millis) throws SQLException, InterruptedException {
         requestsPastMinute++;
-        ConnectionWrapper cw = connections.poll(millis, TimeUnit.MILLISECONDS);
+        ConnectionWrapperImpl cw = connections.poll(millis, TimeUnit.MILLISECONDS);
         if(cw != null && cw.validate()){
-            return cw.borrowConnection();
+            return cw;
         }
         while(!connections.isEmpty()){
             cw = connections.poll(millis, TimeUnit.MILLISECONDS);
             if(cw != null && cw.validate()){
-                return cw.borrowConnection();
+                return cw;
             }
         }
         throw new SQLException("All the connections were either occupied or interupted!");
@@ -117,9 +121,9 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
 
 
     private void initConnAndAddToPool() throws SQLException {
-        ConnectionWrapper cw = cws.isEmpty() ?
-                new ConnectionWrapper(connectionUrl, user, pass, connectionLifeSpan) :
-                new ConnectionWrapper(connectionUrl, user, pass, connectionLifeSpan, prepStatements);
+        ConnectionWrapperImpl cw = cws.isEmpty() ?
+                new ConnectionWrapperImpl(connectionUrl, user, pass, connectionLifeSpan) :
+                new ConnectionWrapperImpl(connectionUrl, user, pass, connectionLifeSpan, prepStatements);
         if(!cw.validate()) throw new SQLException("Could not validate connection after initialized!");
         cws.add(cw);
     }
@@ -161,9 +165,9 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
 
 
     private void manageConnections() throws SQLException, InterruptedException {
-        Iterator<ConnectionWrapper> iterator = cws.iterator();
+        Iterator<ConnectionWrapperImpl> iterator = cws.iterator();
         while (iterator.hasNext()){
-            ConnectionWrapper cw = iterator.next();
+            ConnectionWrapperImpl cw = iterator.next();
             if(cw.isClosed() || cw.hasExpired() || !cw.validate()){
                 removeConnection(cw, iterator);
                 continue;
@@ -179,31 +183,34 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
             }
         } else if(cws.size() > targetConnections){
             int remove = cws.size() - targetConnections;
-            cws.stream().sorted(Comparator.comparing(ConnectionWrapper::getExpiration))
+            cws.stream().sorted(Comparator.comparing(ConnectionWrapperImpl::getExpiration))
                     .limit(remove)
                     .toList()
                     .forEach(cws::remove);
         }
         if(managerConnection.isClosed() || managerConnection.hasExpired() || !managerConnection.validate()){
-            managerConnection = new ConnectionWrapper(connectionUrl, user, pass,
+            managerConnection = new ConnectionWrapperImpl(connectionUrl, user, pass,
                     connectionLifeSpan * 2, Set.of(GET_CONN_STATE));
         }
 
-        for(ConnectionWrapper cw : cws){
+        for(ConnectionWrapperImpl cw : cws){
             if(queryPid(cw) && !connections.contains(cw)){
                 connections.put(cw);
             }
         }
     }
 
-    private boolean queryPid(ConnectionWrapper cw)  {
+    private boolean queryPid(ConnectionWrapperImpl cw)  {
         try{
             PreparedStatement pStmt = managerConnection.getConnection().prepareStatement(GET_CONN_STATE);
             pStmt.setInt(1, cw.getPid());
             ResultSet rs = pStmt.executeQuery();
             if(rs.next()){
-                String state = rs.getString(1);
+                String state = rs.getString("state");
                 if("idle".equalsIgnoreCase(state)){
+                    //TODO: Evaluate if this makes sense, im checking connections by default every half second or so
+                    // and if they are idle I release them, basically if they aren't in a transaction throw them back
+                    // but what if a process takes a bit longer to start... maybe im over thinking this...
                     cw.release();
                     return true;
                 }
@@ -223,7 +230,7 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
 
 
 
-    private void removeConnection(ConnectionWrapper cw, Iterator<ConnectionWrapper> iterator){
+    private void removeConnection(ConnectionWrapperImpl cw, Iterator<ConnectionWrapperImpl> iterator){
         try{
             cw.close();
             iterator.remove();
@@ -232,7 +239,7 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
         }
     }
 
-    private void removeConnection(ConnectionWrapper cw){
+    private void removeConnection(ConnectionWrapperImpl cw){
         try{
             cw.close();
             cws.remove(cw);
@@ -248,7 +255,7 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
         running = false;
         connections.clear();
         Exception lastException = null;
-        for(ConnectionWrapper cw : cws){
+        for(ConnectionWrapperImpl cw : cws){
             try{
                 cw.close();
             } catch (Exception e){

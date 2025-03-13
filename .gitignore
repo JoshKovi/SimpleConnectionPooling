@@ -36,3 +36,4 @@ build/
 
 ### Mac OS ###
 .DS_Store
+/logs/DB_pool_2025-03-13.log
