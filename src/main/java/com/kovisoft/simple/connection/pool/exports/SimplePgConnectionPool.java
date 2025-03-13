@@ -1,6 +1,8 @@
 package com.kovisoft.simple.connection.pool.exports;
 
+import java.sql.Statement;
 import java.util.Collection;
+import java.util.Map;
 
 public interface SimplePgConnectionPool extends SimpleConnectionPool {
 
@@ -16,4 +18,5 @@ public interface SimplePgConnectionPool extends SimpleConnectionPool {
      * otherwise returns the amount added (after length check).
      */
     int addPreparedStatementsToPool(Collection<String> prepStmts);
+
 }
