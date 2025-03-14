@@ -10,47 +10,85 @@ import java.util.*;
 
 public class ConnectionWrapperImpl implements ConnectionWrapper {
 
-    private static final Logger logger = LoggerFactory.getLogger("DB_pool_");
+    private static final Logger logger = LoggerFactory.createLogger(System.getProperty("user.dir") + "/logs", "DB_pool_");
     private static final String GET_PID = "SELECT pid FROM pg_stat_activity WHERE pid = pg_backend_pid();";
+    private static final int REPLACEMENT_WARNING = 2;
     private Integer pid;
     private Connection connection;
     private final LocalDateTime expiration;
 
     volatile boolean inUse = false;
     protected HashMap<String, PreparedStatement> preparedStatements = new HashMap<>();
-    protected HashMap<String, PreparedStatement> tempStatements = new HashMap<>();
     private boolean closed = false;
 
+    @Override
     public boolean hasExpired(){
         return LocalDateTime.now().isAfter(expiration);
     }
 
+    @Override
     public LocalDateTime getExpiration(){
         return expiration;
     }
 
+    @Override
     public boolean isClosed(){
         return closed;
     }
 
+    @Override
     public Integer getPid(){
         return pid;
     }
 
+    @Override
     public Connection borrowConnection() {
         if(inUse) return null;
         inUse = true;
         return connection;
     }
 
+    @Override
     public boolean inUse(){
         return inUse;
     }
 
     @Override
-    public PreparedStatement getPreparedStatement(String key) throws NullPointerException {
-        if(key == null) throw new NullPointerException("Prepared statement keys cannot be null!");
-        return preparedStatements.getOrDefault(key, null);
+    public void release() {
+        inUse = false;
+    }
+
+    @Override
+    public PreparedStatement getPreparedStatement(String keyOrStmtString) throws NullPointerException, SQLException {
+        if(keyOrStmtString == null) throw new NullPointerException("Prepared statement keys cannot be null!");
+        if(preparedStatements.containsKey(keyOrStmtString)){
+            return preparedStatements.get(keyOrStmtString);
+        } else {
+            return connection.prepareStatement(keyOrStmtString);
+        }
+    }
+
+    @Override
+    public PreparedStatement getPreparedStatement(String keyOrStmtString, int statementConst) throws NullPointerException, SQLException {
+        if(keyOrStmtString == null) throw new NullPointerException("Prepared statement keys cannot be null!");
+        if(preparedStatements.containsKey(keyOrStmtString)){
+            return preparedStatements.get(keyOrStmtString);
+        } else {
+            return connection.prepareStatement(keyOrStmtString, statementConst);
+        }
+    }
+
+    /**
+     * Not meant to be used for pooling, intended to allow a db init process to temporarily
+     * use this connection wrapper amd then dispose of after single threaded init is completed.
+     * @param url The url to the db.
+     * @param user The user
+     * @param pass the pass
+     * @throws SQLException Thrown from creating connection.
+     */
+    public ConnectionWrapperImpl(String url, String user, String pass) throws SQLException {
+        connection = DriverManager.getConnection(url, user, pass);
+        this.expiration = LocalDateTime.now();
     }
 
 
@@ -103,26 +141,13 @@ public class ConnectionWrapperImpl implements ConnectionWrapper {
     }
 
     protected boolean notReadyForReplacement(){
-        return !LocalDateTime.now().plusMinutes(2).isAfter(expiration);
-    }
-
-    protected void release() {
-        inUse = false;
-        for(Map.Entry<String, PreparedStatement> entry : tempStatements.entrySet()){
-            try{
-                entry.getValue().close();
-            } catch (Exception e){
-                String stmt = entry.getKey();
-                stmt = (stmt.length() > 64) ? stmt.substring(0,64) : stmt;
-                logger.except("Exception trying to close prepared statement: " + stmt, e);
-
-            }
-        }
-        tempStatements.clear();
+        return !LocalDateTime.now().plusMinutes(REPLACEMENT_WARNING).isAfter(expiration);
     }
 
     protected boolean validate() throws SQLException {
-        return connection.isValid(2);
+        boolean valid = connection.isValid(2);
+        logger.info("Connection validity: " + valid);
+        return valid;
     }
 
 
@@ -139,6 +164,7 @@ public class ConnectionWrapperImpl implements ConnectionWrapper {
 
     @Override
     public void close() throws Exception {
+        logger.info("Closing connection!");
         Exception lastException = null;
         if(preparedStatements != null){
             for(Map.Entry<String, PreparedStatement> entry : preparedStatements.entrySet()){
