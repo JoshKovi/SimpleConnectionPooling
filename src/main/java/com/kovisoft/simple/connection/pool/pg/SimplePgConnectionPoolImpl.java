@@ -6,13 +6,11 @@ import com.kovisoft.simple.connection.pool.exports.ConnectionWrapper;
 import com.kovisoft.simple.connection.pool.exports.PoolConfig;
 import com.kovisoft.simple.connection.pool.exports.SimplePgConnectionPool;
 
-import java.sql.*;
-import java.time.Duration;
-import java.time.OffsetDateTime;
-import java.time.ZonedDateTime;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.stream.Collectors;
 
 
 public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
@@ -34,7 +32,8 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
     private final String connectionUrl;
     private final String user;
     private final String pass;
-    private final Set<String> prepStatements = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private final Map<String, String> prepStatements = new ConcurrentHashMap<>();
+    private final Map<String, Integer> constStatements = new ConcurrentHashMap<>();
 
 
     private final ScheduledExecutorService poolManagementThread;
@@ -47,7 +46,7 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
     public SimplePgConnectionPoolImpl(PoolConfig config) throws SQLException {
         this.minConnections = config.getMinConnections();
         this.maxConnections = config.getMaxConnections();
-        this.targetConnections =  (this.maxConnections - this.minConnections) / 2;
+        this.targetConnections =  Math.max((this.maxConnections - this.minConnections) / 2, minConnections);
         this.requestsPerMinutePerCon = config.getRequestsPerMinutePerConn();
         this.connectionLifeSpan = config.getConnectionLifeSpan();
         this.maxCharacters = config.getMaxCharacters();
@@ -57,46 +56,62 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
         this.connectionUrl = config.getUrl();
         this.user = config.getUser();
         this.pass = config.getPass();
-        managerConnection = new ConnectionWrapperImpl(connectionUrl, user, pass, connectionLifeSpan * 2, Set.of(GET_CONN_STATE));
+        managerConnection = new ConnectionWrapperImpl(connectionUrl, user, pass,
+                connectionLifeSpan * 2, Map.of(GET_CONN_STATE, GET_CONN_STATE));
 
         for(int i = 0; i < targetConnections; i++){initConnAndAddToPool();}
         managePool();
+        logger.info(String.format("Connection was setup minCon: %d, maxCon: %d, target %s, "
+                + "rpmpc: %d, lifeSpan: %d, chars: %d, cache: %d, url: %s", minConnections, maxConnections,
+                targetConnections, requestsPerMinutePerCon, connectionLifeSpan, maxCharacters, maxCachedStatements,
+                connectionUrl
+
+        ));
         poolManagementThread = Executors.newScheduledThreadPool(1);
-        poolManagementThread.scheduleWithFixedDelay(this::managePool, 0, config.getConnectionCheckIntervals(), TimeUnit.MILLISECONDS);
+        poolManagementThread.scheduleWithFixedDelay(this::managePool, 0,
+                config.getConnectionCheckIntervals(), TimeUnit.MILLISECONDS);
         logger.info("Pool Setup without exception!");
 
     }
 
-    public SimplePgConnectionPoolImpl(PoolConfig config, Set<String> prepStatements) throws SQLException {
+    public SimplePgConnectionPoolImpl(PoolConfig config, Map<String, String> prepStatements) throws SQLException {
         this(config);
-        prepStatements = prepStatements.stream()
-                .filter(stmt -> stmt != null && stmt.length() < maxCharacters)
-                .collect(Collectors.toSet());
-        if(prepStatements.size() > maxCachedStatements) {
-            throw new IllegalStateException("The prepared statement set contains more than the allowable limit! (See: maxCachedStatements in config)");
-        }
-        this.prepStatements.addAll(prepStatements);
+        addPreparedStatementsToPool(prepStatements);
+        managePool();
+        logger.info("Default Prepared statements added to pool without exception!");
+    }
+
+    public SimplePgConnectionPoolImpl(PoolConfig config, Map<String, String> prepStatements,
+                                      Map<String, Integer> constStatements) throws SQLException {
+        this(config);
+        addPreparedStatementsToPool(prepStatements, constStatements);
+        managePool();
         logger.info("Default Prepared statements added to pool without exception!");
     }
 
     @Override
     public ConnectionWrapper borrowConnection() throws SQLException, InterruptedException {
-        return borrowConnection(20);
+        return borrowConnection(50);
     }
 
     @Override
     public ConnectionWrapper borrowConnection(long millis) throws SQLException, InterruptedException {
         requestsPastMinute++;
+        logger.info("Connection borrow requested!");
         ConnectionWrapperImpl cw = connections.poll(millis, TimeUnit.MILLISECONDS);
-        if(cw != null && cw.validate()){
+        logger.info("Connection 1st pool complete.");
+        if(cw != null){
             return cw;
         }
+        logger.info("First pool occupied try to get next!");
         while(!connections.isEmpty()){
             cw = connections.poll(millis, TimeUnit.MILLISECONDS);
-            if(cw != null && cw.validate()){
+            if(cw != null){
                 return cw;
             }
         }
+        logger.warn("Connections appear to be in use? All of them?! I don't but it."
+         + "CWS Size: " + cws.size() + ", Connections: " + connections.isEmpty() );
         throw new SQLException("All the connections were either occupied or interupted!");
     }
 
@@ -106,26 +121,37 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
     }
 
     @Override
-    public int addPreparedStatementsToPool(Collection<String> prepStmts){
-        if(prepStmts.size() + prepStatements.size() >= maxCachedStatements){
-            return -1;
-        }
+    public int addPreparedStatementsToPool(Map<String, String> prepStmts) {
+        return addPreparedStatementsToPool(prepStmts, null);
+    }
+
+    @Override
+    public int addPreparedStatementsToPool(Map<String, String> prepStmts, Map<String, Integer> statmentConstMap) {
         int priorToAdd = prepStatements.size();
-        this.prepStatements.addAll(prepStmts.stream()
-                .filter(pStmt -> pStmt != null && pStmt.length() <= maxCharacters)
-                .toList()
-        );
+        boolean notNull = statmentConstMap != null;
+        prepStmts.forEach((key, value) ->{
+            if(value == null || value.length() > maxCharacters
+                    || prepStatements.size() >= maxCachedStatements) return;
+            this.prepStatements.put(key, value);
+            if(notNull && statmentConstMap.containsKey(key)){
+                this.constStatements.put(key, statmentConstMap.get(key));
+            }
+        });
         return prepStatements.size() - priorToAdd;
     }
 
 
 
     private void initConnAndAddToPool() throws SQLException {
-        ConnectionWrapperImpl cw = cws.isEmpty() ?
-                new ConnectionWrapperImpl(connectionUrl, user, pass, connectionLifeSpan) :
-                new ConnectionWrapperImpl(connectionUrl, user, pass, connectionLifeSpan, prepStatements);
-        if(!cw.validate()) throw new SQLException("Could not validate connection after initialized!");
-        cws.add(cw);
+        if(prepStatements.isEmpty() && constStatements.isEmpty()){
+            cws.add(new ConnectionWrapperImpl(connectionUrl, user, pass, connectionLifeSpan));
+        } else if (constStatements.isEmpty()){
+            cws.add(new ConnectionWrapperImpl(connectionUrl, user, pass,
+                    connectionLifeSpan, prepStatements));
+        } else {
+            cws.add(new ConnectionWrapperImpl(connectionUrl, user, pass,
+                    connectionLifeSpan, prepStatements, constStatements));
+        }
     }
 
     private void managePool(){
@@ -156,8 +182,10 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
                     requestsPastMinute, requestsPerMinutePerCon, maxConnections));
             targetConnections = maxConnections;
         } else {
-            targetConnections = (int) Math.ceil((double) requestsPastMinute / requestsPerMinutePerCon);
-            logger.info(String.format("Adjusting connections during medium traffic expectations to %d connections", targetConnections));
+            targetConnections =  Math.max((int) Math.ceil((double) requestsPastMinute / requestsPerMinutePerCon),
+                    minConnections);
+            logger.info(String.format("Adjusting connections during medium traffic expectations to %d connections",
+                    targetConnections));
         }
         requestsPastMinute = 0;
     }
@@ -168,7 +196,7 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
         Iterator<ConnectionWrapperImpl> iterator = cws.iterator();
         while (iterator.hasNext()){
             ConnectionWrapperImpl cw = iterator.next();
-            if(cw.isClosed() || cw.hasExpired() || !cw.validate()){
+            if(cw.isClosed() || cw.hasExpired()){
                 removeConnection(cw, iterator);
                 continue;
             }
@@ -188,13 +216,13 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
                     .toList()
                     .forEach(cws::remove);
         }
-        if(managerConnection.isClosed() || managerConnection.hasExpired() || !managerConnection.validate()){
+        if(managerConnection.isClosed() || managerConnection.hasExpired()){
             managerConnection = new ConnectionWrapperImpl(connectionUrl, user, pass,
-                    connectionLifeSpan * 2, Set.of(GET_CONN_STATE));
+                    connectionLifeSpan * 2, Map.of(GET_CONN_STATE,GET_CONN_STATE));
         }
 
         for(ConnectionWrapperImpl cw : cws){
-            if(queryPid(cw) && !connections.contains(cw)){
+            if(!connections.contains(cw) && (!cw.inUse() || queryPid(cw))){
                 connections.put(cw);
             }
         }
@@ -252,6 +280,7 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
 
     @Override
     public void close() throws Exception {
+        logger.info("Closing connection pool!");
         running = false;
         connections.clear();
         Exception lastException = null;

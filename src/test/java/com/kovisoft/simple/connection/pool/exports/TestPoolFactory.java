@@ -5,14 +5,15 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 public class TestPoolFactory {
 
         private final static String url = System.getenv("url");
         private final static String user = System.getenv("user");
         private final static String pass = System.getenv("pass");
-        private static PoolConfig config = new PoolConfig(url, user, pass);
+        private static final PoolConfig config = new PoolConfig(url, user, pass);
         private static SimplePgConnectionPool pool;
 
         /*
@@ -35,10 +36,11 @@ public class TestPoolFactory {
         public void testCreateDefaultPool(){
             Assertions.assertDoesNotThrow(() -> {
                 try(SimplePgConnectionPool pool = PoolFactory.createDefaultPgPool(url, user, pass)){
-                       Assertions.assertNotNull(pool);
-                       Assertions.assertNotNull(pool.borrowConnection());
-                       Assertions.assertEquals(1, pool.addPreparedStatementsToPool(List.of("SELECT 1")));
-                       pool.shutDownPool();
+                    Assertions.assertNotNull(pool);
+                    Assertions.assertNotNull(pool.borrowConnection());
+                    Map<String, String> testMap = new HashMap<>(){{put("key", "SELECT 1");}};
+                    Assertions.assertEquals(1, pool.addPreparedStatementsToPool(testMap));
+                    pool.shutDownPool();
                 }
             });
         }
