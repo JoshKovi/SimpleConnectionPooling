@@ -1,9 +1,9 @@
 package com.kovisoft.simple.connection.pool.exports;
 
-import java.sql.Connection;
+
 import java.sql.SQLException;
 
-public interface SimpleConnectionPool extends AutoCloseable{
+public interface SimpleConnectionPool {
 
     /**
      * Borrows a connection from the pool. The default pg implementation
@@ -29,9 +29,9 @@ public interface SimpleConnectionPool extends AutoCloseable{
 
 
     /**
-     * Tells the connection pool to shut down.
+     * Tells the connection pool to shut down. Exception comes from the mostly graceful shutdown.
      */
-    void shutDownPool();
+    void shutDownPool() throws Exception;
 
 
 }

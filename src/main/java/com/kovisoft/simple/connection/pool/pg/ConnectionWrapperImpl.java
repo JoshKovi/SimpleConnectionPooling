@@ -8,7 +8,7 @@ import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.*;
 
-public class ConnectionWrapperImpl implements ConnectionWrapper {
+public class ConnectionWrapperImpl implements ConnectionWrapper, AutoCloseable {
 
     private static final Logger logger = LoggerFactory.createLogger(System.getProperty("user.dir") + "/logs", "DB_pool_");
     private static final String GET_PID = "SELECT pid FROM pg_stat_activity WHERE pid = pg_backend_pid();";

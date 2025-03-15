@@ -5,7 +5,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 
-public interface ConnectionWrapper extends AutoCloseable {
+public interface ConnectionWrapper {
 
     //These really don't matter outside the pool, but they are there if you want them for some reason;
     boolean hasExpired();
@@ -14,6 +14,7 @@ public interface ConnectionWrapper extends AutoCloseable {
     Integer getPid();
     Connection borrowConnection();
     boolean inUse();
+
 
     /**
      * Allows you to explicitly release a connection, can help with pool management,
@@ -46,7 +47,7 @@ public interface ConnectionWrapper extends AutoCloseable {
      * you used a non cached statement.
      * @throws NullPointerException Exception thrown for a null key
      */
-    public PreparedStatement getPreparedStatement(String keyOrStmtString, int statementConst)
+    PreparedStatement getPreparedStatement(String keyOrStmtString, int statementConst)
             throws NullPointerException, SQLException;
 
 }

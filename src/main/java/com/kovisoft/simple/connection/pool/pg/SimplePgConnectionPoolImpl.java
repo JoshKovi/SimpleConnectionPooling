@@ -13,7 +13,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 
-public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
+public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool, AutoCloseable {
 
     protected final Logger logger = LoggerFactory.createLogger(System.getProperty("user.dir") + "/logs", "DB_pool_");
     private final static String GET_CONN_STATE = "SELECT state FROM pg_stat_activity WHERE pid = ?";
@@ -37,6 +37,7 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
 
 
     private final ScheduledExecutorService poolManagementThread;
+    private final ScheduledExecutorService validationExecutor;
     private volatile boolean running = true;
     private int requestsPastMinute = 0;
     private long minuteStart = System.currentTimeMillis();
@@ -70,6 +71,10 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
         poolManagementThread = Executors.newScheduledThreadPool(1);
         poolManagementThread.scheduleWithFixedDelay(this::managePool, 0,
                 config.getConnectionCheckIntervals(), TimeUnit.MILLISECONDS);
+
+        validationExecutor = Executors.newScheduledThreadPool(1);
+        validationExecutor.scheduleWithFixedDelay(this::validateConnections, 5, 5, TimeUnit.MINUTES);
+
         logger.info("Pool Setup without exception!");
 
     }
@@ -111,13 +116,14 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
             }
         }
         logger.warn("Connections appear to be in use? All of them?! I don't but it."
-         + "CWS Size: " + cws.size() + ", Connections: " + connections.isEmpty() );
+         + "Connection Wrapper Set Size: " + cws.size() + ", Connections Empty");
         throw new SQLException("All the connections were either occupied or interupted!");
     }
 
     @Override
-    public void shutDownPool(){
+    public void shutDownPool() throws Exception {
         running = false;
+        close();
     }
 
     @Override
@@ -151,6 +157,17 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
         } else {
             cws.add(new ConnectionWrapperImpl(connectionUrl, user, pass,
                     connectionLifeSpan, prepStatements, constStatements));
+        }
+    }
+
+    private void validateConnections(){
+        for(ConnectionWrapperImpl cw : cws){
+            try{
+                if(!cw.validate()) cw.close();
+            } catch(Exception e){
+                logger.except("Exception occurred during validation of thread.");
+                cw = null;
+            }
         }
     }
 
@@ -196,7 +213,7 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
         Iterator<ConnectionWrapperImpl> iterator = cws.iterator();
         while (iterator.hasNext()){
             ConnectionWrapperImpl cw = iterator.next();
-            if(cw.isClosed() || cw.hasExpired()){
+            if(cw == null || cw.isClosed() || cw.hasExpired()){
                 removeConnection(cw, iterator);
                 continue;
             }
@@ -260,7 +277,8 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
 
     private void removeConnection(ConnectionWrapperImpl cw, Iterator<ConnectionWrapperImpl> iterator){
         try{
-            cw.close();
+            if(cw != null) {cw.close();}
+
             iterator.remove();
         } catch (Exception e) {
             iterator.remove();
@@ -269,6 +287,7 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
 
     private void removeConnection(ConnectionWrapperImpl cw){
         try{
+            if(cw != null) {cw.close();}
             cw.close();
             cws.remove(cw);
         } catch (Exception e) {
@@ -286,17 +305,23 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool {
         Exception lastException = null;
         for(ConnectionWrapperImpl cw : cws){
             try{
-                cw.close();
+                if(cw != null) {cw.close();}
             } catch (Exception e){
                 logger.except("Exception thrown trying to close connection from Pool close operation.", e);
+                cw = null;
                 lastException = e;
             }
-
         }
         try{
             poolManagementThread.close();
         } catch (Exception e){
             logger.except("Exception thrown trying to close pool manager connection from Pool close operation.", e);
+            lastException = e;
+        }
+        try{
+            validationExecutor.close();
+        } catch (Exception e){
+            logger.except("Exception thrown trying to close validationExecutor from Pool close operation.", e);
             lastException = e;
         }
         if(lastException != null) throw lastException;
