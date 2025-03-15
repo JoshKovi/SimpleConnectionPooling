@@ -27,7 +27,7 @@ public class TestPoolFactory {
         }
 
         @AfterAll
-        public static void tearDownPool() throws InterruptedException {
+        public static void tearDownPool() {
             Assertions.assertDoesNotThrow(() -> pool.shutDownPool());
         }
 
@@ -35,13 +35,12 @@ public class TestPoolFactory {
         @Test
         public void testCreateDefaultPool(){
             Assertions.assertDoesNotThrow(() -> {
-                try(SimplePgConnectionPool pool = PoolFactory.createDefaultPgPool(url, user, pass)){
-                    Assertions.assertNotNull(pool);
-                    Assertions.assertNotNull(pool.borrowConnection());
-                    Map<String, String> testMap = new HashMap<>(){{put("key", "SELECT 1");}};
-                    Assertions.assertEquals(1, pool.addPreparedStatementsToPool(testMap));
-                    pool.shutDownPool();
-                }
+                SimplePgConnectionPool pool = PoolFactory.createDefaultPgPool(url, user, pass);
+                Assertions.assertNotNull(pool);
+                Assertions.assertNotNull(pool.borrowConnection());
+                Map<String, String> testMap = new HashMap<>(){{put("key", "SELECT 1");}};
+                Assertions.assertEquals(1, pool.addPreparedStatementsToPool(testMap));
+                pool.shutDownPool();
             });
         }
 

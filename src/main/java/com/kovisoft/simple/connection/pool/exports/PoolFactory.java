@@ -3,7 +3,6 @@ package com.kovisoft.simple.connection.pool.exports;
 import com.kovisoft.simple.connection.pool.pg.ConnectionWrapperImpl;
 import com.kovisoft.simple.connection.pool.pg.SimplePgConnectionPoolImpl;
 
-import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.Map;
 
