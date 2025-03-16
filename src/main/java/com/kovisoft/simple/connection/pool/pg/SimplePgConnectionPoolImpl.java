@@ -6,6 +6,7 @@ import com.kovisoft.simple.connection.pool.exports.ConnectionWrapper;
 import com.kovisoft.simple.connection.pool.exports.PoolConfig;
 import com.kovisoft.simple.connection.pool.exports.SimplePgConnectionPool;
 
+import java.io.IOException;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -15,7 +16,7 @@ import java.util.concurrent.*;
 
 public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool, AutoCloseable {
 
-    protected final Logger logger = LoggerFactory.createLogger(System.getProperty("user.dir") + "/logs", "DB_pool_");
+    protected final Logger logger;
     private final static String GET_CONN_STATE = "SELECT state FROM pg_stat_activity WHERE pid = ?";
     private ConnectionWrapperImpl managerConnection;
     private final BlockingQueue<ConnectionWrapperImpl> connections;
@@ -45,6 +46,12 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool, AutoC
     private volatile int targetConnections;
 
     public SimplePgConnectionPoolImpl(PoolConfig config) throws SQLException {
+        try{
+            logger = LoggerFactory.createLogger(System.getProperty("user.dir") + "/logs",
+                    "DB_pool_");
+        } catch (IOException e) {
+            throw new RuntimeException("Could not startup the Connection Wrapper logger!", e);
+        }
         this.minConnections = config.getMinConnections();
         this.maxConnections = config.getMaxConnections();
         this.targetConnections =  Math.max((this.maxConnections - this.minConnections) / 2, minConnections);

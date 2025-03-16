@@ -4,13 +4,14 @@ import com.kovisoft.logger.exports.Logger;
 import com.kovisoft.logger.exports.LoggerFactory;
 import com.kovisoft.simple.connection.pool.exports.ConnectionWrapper;
 
+import java.io.IOException;
 import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.*;
 
 public class ConnectionWrapperImpl implements ConnectionWrapper, AutoCloseable {
 
-    private static final Logger logger = LoggerFactory.createLogger(System.getProperty("user.dir") + "/logs", "DB_pool_");
+    private final Logger logger;
     private static final String GET_PID = "SELECT pid FROM pg_stat_activity WHERE pid = pg_backend_pid();";
     private static final int REPLACEMENT_WARNING = 2;
     private Integer pid;
@@ -87,12 +88,24 @@ public class ConnectionWrapperImpl implements ConnectionWrapper, AutoCloseable {
      * @throws SQLException Thrown from creating connection.
      */
     public ConnectionWrapperImpl(String url, String user, String pass) throws SQLException {
+        try{
+            logger = LoggerFactory.createLogger(System.getProperty("user.dir") + "/logs",
+                    "DB_pool_");
+        } catch (IOException e) {
+            throw new RuntimeException("Could not startup the Connection Wrapper logger!", e);
+        }
         connection = DriverManager.getConnection(url, user, pass);
         this.expiration = LocalDateTime.now();
     }
 
 
     protected ConnectionWrapperImpl(String url, String user, String pass, int lifespanMinutes) throws SQLException {
+        try{
+            logger = LoggerFactory.createLogger(System.getProperty("user.dir") + "/logs",
+                    "DB_pool_");
+        } catch (IOException e) {
+            throw new RuntimeException("Could not startup the Connection Wrapper logger!", e);
+        }
         this.expiration = LocalDateTime.now().plusMinutes(lifespanMinutes);
         connection = DriverManager.getConnection(url, user, pass);
         setConnectionPid();
@@ -110,7 +123,7 @@ public class ConnectionWrapperImpl implements ConnectionWrapper, AutoCloseable {
         addPreparedStatements(statements, constants);
     }
 
-    protected void addPreparedStatements(Map<String, String> prepStatements) throws SQLException {
+    public void addPreparedStatements(Map<String, String> prepStatements) throws SQLException {
         for(Map.Entry<String, String> entry : prepStatements.entrySet()){
             if(preparedStatements.containsKey(entry.getKey())) continue;
             if(entry.getValue() == null) continue;
@@ -118,7 +131,7 @@ public class ConnectionWrapperImpl implements ConnectionWrapper, AutoCloseable {
         }
     }
 
-    protected void addPreparedStatements(Map<String, String> prepStatements,
+    public void addPreparedStatements(Map<String, String> prepStatements,
                                          Map<String, Integer> stmtConstants) throws SQLException {
         for(Map.Entry<String, String> entry : prepStatements.entrySet()){
             if(preparedStatements.containsKey(entry.getKey())) continue;
