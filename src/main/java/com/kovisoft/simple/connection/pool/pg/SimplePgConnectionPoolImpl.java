@@ -108,23 +108,41 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool, AutoC
 
     @Override
     public ConnectionWrapper borrowConnection(long millis) throws SQLException, InterruptedException {
+        return borrowConnection(millis, false);
+    }
+
+
+    private ConnectionWrapper borrowConnection(long millis, boolean retry) throws SQLException, InterruptedException {
         requestsPastMinute++;
         logger.info("Connection borrow requested!");
-        ConnectionWrapperImpl cw = connections.poll(millis, TimeUnit.MILLISECONDS);
-        logger.info("Connection 1st pool complete.");
-        if(cw != null){
-            return cw;
-        }
-        logger.info("First pool occupied try to get next!");
-        while(!connections.isEmpty()){
-            cw = connections.poll(millis, TimeUnit.MILLISECONDS);
-            if(cw != null){
-                return cw;
+        try{
+            ConnectionWrapperImpl cw = connections.poll(millis, TimeUnit.MILLISECONDS);
+            while (cw != null){
+                logger.info("Connection validating cw...");
+                if(!cw.isClosed() && cw.validate()){
+                    logger.info("Valid and not closed connection was discovered in the pool!");
+                    return  cw;
+                }
+                logger.warn("Connection was either invalid or closed, removing it and retrieving another");
+                removeConnection(cw);
+                cw = connections.poll(millis, TimeUnit.MILLISECONDS);
+            }
+        } catch (Exception e){
+            logger.except("An Exception occurred while attempting to borrow a connection!", e);
+            if(retry) throw e;
+            else {
+                managePool();
+                return borrowConnection(millis, true);
             }
         }
         logger.warn("Connections appear to be in use? All of them?! I don't but it."
          + "Connection Wrapper Set Size: " + cws.size() + ", Connections Empty");
-        throw new SQLException("All the connections were either occupied or interupted!");
+
+        if(!retry) {
+            managePool();
+            return borrowConnection(millis, true);
+        }
+        else throw new SQLException("All the connections were either occupied or interupted!");
     }
 
     @Override
