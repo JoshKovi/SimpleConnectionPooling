@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
+import java.util.Map;
 
 public interface ConnectionWrapper {
 
@@ -14,6 +15,7 @@ public interface ConnectionWrapper {
     Integer getPid();
     Connection borrowConnection();
     boolean inUse();
+    void close() throws Exception;
 
 
     /**
@@ -49,5 +51,23 @@ public interface ConnectionWrapper {
      */
     PreparedStatement getPreparedStatement(String keyOrStmtString, int statementConst)
             throws NullPointerException, SQLException;
+
+    /**
+     * When dealing with an individual CW it is useful to be able to add statements.
+     * That being said these statements do not propagate to other connections.
+     * @param prepStatements The prepared statement strings with their short name keys to prepare.
+     * @throws SQLException Typical Prepared statement SQL Exception
+     */
+    void addPreparedStatements(Map<String, String> prepStatements) throws SQLException;
+
+    /**
+     * When dealing with an individual CW it is useful to be able to add statements.
+     * That being said these statements do not propagate to other connections.
+     * @param prepStatements The prepared statement strings to prepare with their short keys.
+     * @param stmtConstants The prepared statement constants with their short keys.
+     * @throws SQLException Typical Prepared statement SQL Exception
+     */
+    void addPreparedStatements(Map<String, String> prepStatements, Map<String, Integer> stmtConstants) throws SQLException;
+
 
 }
