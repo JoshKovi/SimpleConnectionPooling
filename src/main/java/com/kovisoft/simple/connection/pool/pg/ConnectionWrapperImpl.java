@@ -34,6 +34,12 @@ public class ConnectionWrapperImpl implements ConnectionWrapper, AutoCloseable {
 
     @Override
     public boolean isClosed(){
+        try{
+            closed = connection.isClosed();
+        } catch (SQLException e) {
+            logger.except("Connection threw exception on isClosed() check.", e);
+            closed = true;
+        }
         return closed;
     }
 
@@ -158,7 +164,7 @@ public class ConnectionWrapperImpl implements ConnectionWrapper, AutoCloseable {
     }
 
     protected boolean validate() throws SQLException {
-        boolean valid = connection.isValid(2);
+        boolean valid = connection.isValid(5);
         logger.info("Connection validity: " + valid);
         return valid;
     }
@@ -191,7 +197,6 @@ public class ConnectionWrapperImpl implements ConnectionWrapper, AutoCloseable {
                 }
             }
         }
-        preparedStatements = null;
         try{
             if(connection != null && !connection.isClosed()){
                 connection.close();

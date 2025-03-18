@@ -8,7 +8,7 @@ public class PoolConfig  implements Serializable {
     private int maxConnections = 10;
     private int requestsPerMinutePerConn = 20;
     private int connectionLifeSpan = 30;
-    private int connectionCheckIntervals = 5;
+    private int connectionCheckIntervals = 10;
     private int maxCharacters = 2048;
     private int maxCachedStatements = 200;
     private String url;
