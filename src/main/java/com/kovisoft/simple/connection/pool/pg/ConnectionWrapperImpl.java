@@ -165,7 +165,7 @@ public class ConnectionWrapperImpl implements ConnectionWrapper, AutoCloseable {
 
     protected boolean validate() throws SQLException {
         boolean valid = connection.isValid(5);
-        logger.info("Connection validity: " + valid);
+        //logger.info("Connection validity: " + valid);
         return valid;
     }
 

@@ -115,11 +115,11 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool, AutoC
 
     private ConnectionWrapper borrowConnection(long millis, boolean retry) throws SQLException, InterruptedException {
         requestsPastMinute.incrementAndGet();
-        logger.info("Connection borrow requested!");
+        logger.info("Connection borrow requested! Current connections in queue: " + connections.size() + ", Current cws:" + cws.size());
         try{
             ConnectionWrapperImpl cw = connections.poll(millis, TimeUnit.MILLISECONDS);
             while (cw != null){
-                logger.info("Connection validating cw not closed...");
+                //logger.info("Connection validating cw not closed...");
                 if(!cw.isClosed()){
                     logger.info("cw that was not closed connection was discovered in the pool, returning to user!");
                     return  cw;
@@ -190,7 +190,7 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool, AutoC
     private void validateConnections(){
         for(ConnectionWrapperImpl cw : cws){
             try{
-                logger.info("Attempting to validate connection wrapper");
+                //logger.info("Attempting to validate connection wrapper");
                 if(!cw.validate()) {
                     cw.close();
                     cw = null;
@@ -245,7 +245,7 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool, AutoC
     private void manageConnections() throws SQLException, InterruptedException {
         Iterator<ConnectionWrapperImpl> iterator = cws.iterator();
         boolean onlyOnce = true; // Used to stop the pool from removing every expiring connection at once.
-        logger.info("Entering Connection removal section of management. Current connections: " + cws.size());
+        //logger.info("Entering Connection removal section of management. Current connections: " + cws.size());
         while (iterator.hasNext()){
             ConnectionWrapperImpl cw = iterator.next();
             if(cw == null || cw.isClosed() || cw.hasExpired()){
@@ -259,8 +259,8 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool, AutoC
                 cw.addPreparedStatements(prepStatements);
             }
         }
-        logger.info("Exiting Connection removal section of management. Current connections: " + cws.size());
-        logger.info("Entering Connection Balancing section of management. Current connections: " + cws.size());
+        //logger.info("Exiting Connection removal section of management. Current connections: " + cws.size());
+        //logger.info("Entering Connection Balancing section of management. Current connections: " + cws.size());
         if(cws.size() < targetConnections){
             int genCount = targetConnections - cws.size();
             for(int i = 0; i < genCount; i++){
@@ -273,19 +273,19 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool, AutoC
                     .toList()
                     .forEach(cws::remove);
         }
-        logger.info("Exiting Connection Balancing section of management. Current connections: " + cws.size());
+        //logger.info("Exiting Connection Balancing section of management. Current connections: " + cws.size());
         if(managerConnection.isClosed() || managerConnection.hasExpired()){
             managerConnection = new ConnectionWrapperImpl(connectionUrl, user, pass,
                     connectionLifeSpan * 2, Map.of(GET_CONN_STATE,GET_CONN_STATE));
         }
 
-        logger.info("Entering Connection queue addition section of management. Current connections in queue: " + connections.size());
+        //logger.info("Entering Connection queue addition section of management. Current connections in queue: " + connections.size());
         for(ConnectionWrapperImpl cw : cws){
             if(!connections.contains(cw) && (!cw.inUse() || queryPid(cw))){
                 connections.put(cw);
             }
         }
-        logger.info("Exiting Connection queue addition section of management. Current connections in queue: " + connections.size());
+//        logger.info("Exiting Connection queue addition section of management. Current connections in queue: " + connections.size());
     }
 
     private boolean queryPid(ConnectionWrapperImpl cw)  {
@@ -320,7 +320,7 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool, AutoC
 
     private void removeConnection(ConnectionWrapperImpl cw, Iterator<ConnectionWrapperImpl> iterator){
         try{
-            logger.info("Removing connection wrapper with iterator cw is null:" + (cw == null));
+            //logger.info("Removing connection wrapper with iterator cw is null:" + (cw == null));
             if(cw != null) {cw.close();}
             iterator.remove();
         } catch (Exception e) {
@@ -331,7 +331,7 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool, AutoC
 
     private void removeConnection(ConnectionWrapperImpl cw){
         try{
-            logger.info("Removing connection wrapper directly cw is null:" + (cw == null));
+            //logger.info("Removing connection wrapper directly cw is null:" + (cw == null));
             if(cw != null) {cw.close();}
             cws.remove(cw);
         } catch (Exception e) {
