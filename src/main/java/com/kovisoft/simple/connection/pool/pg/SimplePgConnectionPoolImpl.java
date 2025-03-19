@@ -68,7 +68,9 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool, AutoC
         managerConnection = new ConnectionWrapperImpl(connectionUrl, user, pass,
                 connectionLifeSpan * 2, Map.of(GET_CONN_STATE, GET_CONN_STATE));
 
-        for(int i = 0; i < targetConnections; i++){initConnAndAddToPool();}
+        for(int i = 0; i < targetConnections; i++){
+            initConnAndAddToPool();
+        }
         managePool();
         logger.info(String.format("Connection was setup minCon: %d, maxCon: %d, target %s, "
                 + "rpmpc: %d, lifeSpan: %d, chars: %d, cache: %d, url: %s", minConnections, maxConnections,
@@ -149,12 +151,12 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool, AutoC
     }
 
     @Override
-    public int addPreparedStatementsToPool(Map<String, String> prepStmts) {
+    public int addPreparedStatementsToPool(Map<String, String> prepStmts) throws SQLException {
         return addPreparedStatementsToPool(prepStmts, null);
     }
 
     @Override
-    public int addPreparedStatementsToPool(Map<String, String> prepStmts, Map<String, Integer> statmentConstMap) {
+    public int addPreparedStatementsToPool(Map<String, String> prepStmts, Map<String, Integer> statmentConstMap) throws SQLException {
         int priorToAdd = prepStatements.size();
         boolean notNull = statmentConstMap != null;
         prepStmts.forEach((key, value) ->{
@@ -165,6 +167,9 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool, AutoC
                 this.constStatements.put(key, statmentConstMap.get(key));
             }
         });
+        for(ConnectionWrapper cw : cws){
+            cw.addPreparedStatements(this.prepStatements, this.constStatements);
+        }
         return prepStatements.size() - priorToAdd;
     }
 
@@ -256,7 +261,7 @@ public class SimplePgConnectionPoolImpl implements SimplePgConnectionPool, AutoC
                 onlyOnce = false;
             }
             if(cw.notReadyForReplacement() && prepStatements.size() > cw.countStatements()){
-                cw.addPreparedStatements(prepStatements);
+                cw.addPreparedStatements(prepStatements, constStatements);
             }
         }
         //logger.info("Exiting Connection removal section of management. Current connections: " + cws.size());
