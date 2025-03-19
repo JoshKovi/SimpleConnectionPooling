@@ -1,6 +1,7 @@
 package com.kovisoft.simple.connection.pool.exports;
 
 
+import java.sql.SQLException;
 import java.util.Map;
 
 public interface SimplePgConnectionPool extends SimpleConnectionPool {
@@ -17,7 +18,7 @@ public interface SimplePgConnectionPool extends SimpleConnectionPool {
      * @return Returns -1 if the statements would overfill the cache,
      * otherwise returns the amount added (after length check).
      */
-    int addPreparedStatementsToPool(Map<String, String> prepStmts);
+    int addPreparedStatementsToPool(Map<String, String> prepStmts) throws SQLException;
 
     /**
      * Takes in a collection of prepared statement strings then caches
@@ -33,6 +34,6 @@ public interface SimplePgConnectionPool extends SimpleConnectionPool {
      * @return Returns -1 if the statements would overfill the cache,
      * otherwise returns the amount added (after length check).
      */
-    int addPreparedStatementsToPool(Map<String, String> prepStmts, Map<String, Integer> statmentConstMap);
+    int addPreparedStatementsToPool(Map<String, String> prepStmts, Map<String, Integer> statmentConstMap) throws SQLException;
 
 }
